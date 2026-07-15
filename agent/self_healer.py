@@ -8,7 +8,9 @@ verde o hasta agotar presupuesto.
 """
 
 import asyncio
+import hashlib
 import os
+import re
 import subprocess
 import sys
 import time
@@ -32,6 +34,9 @@ PROJECT_DIR = (AGENT_DIR / ".." / "project").resolve()
 MAX_ITERATIONS = int(os.environ.get("AGENT_MAX_ITERATIONS", "6"))
 MAX_SECONDS = int(os.environ.get("AGENT_MAX_SECONDS", str(15 * 60)))
 MAX_TURNS_PER_ITERATION = int(os.environ.get("AGENT_MAX_TURNS", "30"))
+# Si la "firma" del fallo no cambia en N iteraciones seguidas, se detiene:
+# es la senal de que la correccion no ataca la causa (no-progreso).
+NO_PROGRESS_LIMIT = int(os.environ.get("AGENT_NO_PROGRESS_LIMIT", "2"))
 
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Edit", "Bash"]
 
@@ -61,9 +66,39 @@ def truncate(text: str, limit: int = 6000) -> str:
     return text[:limit] + f"\n...[truncado, {len(text) - limit} caracteres omitidos]"
 
 
+FAILURE_LINE_RE = re.compile(r"(?:^|\n)\s*(?:×|FAIL|AssertionError|Error:).*", re.IGNORECASE)
+
+
+def failure_signature(test_output: str) -> str:
+    """Hash estable de las lineas de fallo: detecta si dos corridas fallan por lo mismo."""
+    lines = FAILURE_LINE_RE.findall(test_output)
+    if not lines:
+        lines = [test_output[-2000:]]
+    normalized = "\n".join(sorted(line.strip() for line in lines))
+    return hashlib.sha256(normalized.encode("utf-8", errors="ignore")).hexdigest()[:12]
+
+
 # --- Invocacion del agente ---------------------------------------------------
 
-def build_prompt(test_output: str) -> str:
+def build_prompt(test_output: str, attempts: list[dict], warn_same_failure: bool) -> str:
+    history_block = "Sin intentos previos."
+    if attempts:
+        lines = []
+        for a in attempts:
+            lines.append(
+                f"- Iteracion {a['iteration']}: firma={a['signature']} -> "
+                f"acciones: {a['actions_summary']} -> resultado: {a['result']}"
+            )
+        history_block = "\n".join(lines)
+
+    warning = ""
+    if warn_same_failure:
+        warning = (
+            "\nADVERTENCIA: el intento anterior NO cambio la firma del fallo "
+            "(mismo error persiste). No repitas el mismo cambio: reconsidera "
+            "la causa raiz y prueba una estrategia distinta.\n"
+        )
+
     return f"""Estas en el repositorio de un gestor de tareas (TypeScript: Fastify+SQLite en
 el backend, Vite+React en el frontend, tests con Vitest). El directorio de
 trabajo es la raiz del proyecto ({PROJECT_DIR}). La suite de tests
@@ -81,6 +116,9 @@ Salida real de la ultima corrida de 'npm test':
 ```
 {truncate(test_output)}
 ```
+{warning}
+Historial de intentos previos en este ciclo de reparacion:
+{history_block}
 """
 
 
@@ -130,17 +168,41 @@ async def main():
         print("La suite ya esta en verde antes de invocar al agente. Abortando.")
         return
 
+    attempts: list[dict] = []
+    signatures: list[str] = []
+
     for iteration in range(1, MAX_ITERATIONS + 1):
         if time.monotonic() - start > MAX_SECONDS:
             print("Presupuesto de tiempo agotado.")
             break
 
-        print(f"\n== Iteracion {iteration} ==")
-        prompt = build_prompt(output)
-        await run_agent_iteration(prompt)
+        sig = failure_signature(output)
+        recent = signatures[-(NO_PROGRESS_LIMIT - 1):] if NO_PROGRESS_LIMIT > 1 else []
+        if len(recent) == NO_PROGRESS_LIMIT - 1 and all(s == sig for s in recent):
+            print(
+                f"No-progreso: la firma del fallo ({sig}) se repite "
+                f"{NO_PROGRESS_LIMIT} veces seguidas. Me detengo con diagnostico."
+            )
+            break
+
+        warn_same = bool(signatures) and signatures[-1] == sig
+        print(f"\n== Iteracion {iteration} (firma={sig}) ==")
+        prompt = build_prompt(output, attempts, warn_same)
+        actions_summary = await run_agent_iteration(prompt)
 
         passed, output = run_tests()
-        print(f"Resultado tras la correccion: {'VERDE' if passed else 'sigue en ROJO'}")
+        result_text = "VERDE" if passed else "sigue en ROJO"
+        print(f"Resultado tras la correccion: {result_text}")
+
+        attempts.append(
+            {
+                "iteration": iteration,
+                "signature": sig,
+                "actions_summary": actions_summary,
+                "result": result_text,
+            }
+        )
+        signatures.append(sig)
 
         if passed:
             break
