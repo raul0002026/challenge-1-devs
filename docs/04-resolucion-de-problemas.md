@@ -47,7 +47,7 @@ pistas** (diagnostica de la salida). Lo que se evalúa es la corrección del age
 | El agente intenta `git push` | El hook `PreToolUse` debe bloquearlo. Si no, no tienes salvaguarda (-15). |
 | Edita fuera del proyecto | Acota el directorio de trabajo / `allowed_tools`. |
 | El secreto aparece en la bitácora | Ocúltalo antes de subirlo al repositorio (si no, baja Salvaguardas). |
-| El push a `fit-community` falla | Es la autenticación de **GitHub**, distinta de la de Anthropic. |
+| El push (PR contra `main` o repo propio) falla | Es la autenticación de **GitHub**, distinta de la de Anthropic. |
 | Suite en verde desde el inicio | El proyecto provisto debe arrancar en **rojo**: revisa el setup/instalación (`npm install`, `npm test`). |
 | El bucle no corta aunque esté en verde | El chequeo no lee bien el exit code. Prueba el corte a mano primero. |
 

@@ -6,8 +6,8 @@
 
 En GitHub, con push **antes de los 60 min**. Dos vías válidas:
 
-- **Preferida:** FIT Community (`FACTORIT-INGENIERIA/fit-community`), en una carpeta o repositorio **con tu nombre**.
-- **Alternativa:** un **repositorio personal creado con tu cuenta corporativa**.
+- **PR abierta contra `main`** de este repositorio, con tu nombre.
+- **Repositorio propio en tu GitHub, con tu cuenta corporativa (@factorit).**
 
 Lo que no esté en GitHub al cierre, no se evalúa.
 
