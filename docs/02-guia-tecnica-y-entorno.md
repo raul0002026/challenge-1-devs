@@ -1,4 +1,4 @@
-# EVAL-DEV-1 · Parte 2 — Guía técnica
+# Parte 2 — Guía técnica
 
 > Guía técnica: SDK, autenticación, ejecución headless, salvaguardas y el bucle. El encargo está en [01](01-encargo-y-contexto.md) y la entrega y evaluación en [03](03-entrega-y-rubrica.md).
 

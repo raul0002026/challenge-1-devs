@@ -1,6 +1,6 @@
-# EVAL-DEV-1 — Prueba de desempeño
+# Prueba de desempeño
 
-Este repositorio contiene la prueba de desempeño **EVAL-DEV-1** y el proyecto objetivo sobre el que se trabaja.
+Este repositorio contiene la prueba de desempeño y el proyecto objetivo sobre el que se trabaja.
 
 - **[`docs/`](docs/)** — el enunciado de la prueba, en 4 partes.
 - **[`project/`](project/)** — el proyecto objetivo: una web app full-stack (gestor de tareas) sobre la que actúa el agente autorreparable. Cuando su suite de tests se rompe, el agente debe diagnosticar, corregir, verificar y repetir hasta recuperar el verde o agotar su presupuesto.

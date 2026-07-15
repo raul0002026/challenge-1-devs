@@ -1,4 +1,4 @@
-# Gestor de tareas — proyecto objetivo (EVAL-DEV-1)
+# Gestor de tareas — proyecto objetivo
 
 Web app full-stack mínima pero real: un gestor de tareas con login, tablero de tareas
 (crear, editar, eliminar, avanzar de estado, filtrar) y un panel de métricas.

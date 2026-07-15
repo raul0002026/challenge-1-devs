@@ -1,4 +1,4 @@
-# EVAL-DEV-1 · Parte 1 — El encargo
+# Parte 1 — El encargo
 
 > Empieza por aquí: qué se construye y por qué. Sigue con la guía técnica en [02](02-guia-tecnica-y-entorno.md) y la entrega y evaluación en [03](03-entrega-y-rubrica.md).
 

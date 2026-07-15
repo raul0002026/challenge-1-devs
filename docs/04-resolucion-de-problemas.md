@@ -1,4 +1,4 @@
-# EVAL-DEV-1 · Anexo — Resolución de problemas y casos borde
+# Anexo — Resolución de problemas y casos borde
 
 > Se consulta, no se lee entero. Busca tu caso en la tabla.
 

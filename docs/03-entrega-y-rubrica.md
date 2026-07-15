@@ -1,4 +1,4 @@
-# EVAL-DEV-1 · Parte 3 — Entrega y evaluación
+# Parte 3 — Entrega y evaluación
 
 > Qué se entrega y cómo se corrige. El encargo está en [01](01-encargo-y-contexto.md) y la guía técnica en [02](02-guia-tecnica-y-entorno.md).
 
