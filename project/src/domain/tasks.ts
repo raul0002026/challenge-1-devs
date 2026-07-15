@@ -117,7 +117,7 @@ export function validateTaskUpdate(input: TaskUpdateInput): TaskUpdateValidation
 
 const ALLOWED_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   todo: ['doing'],
-  doing: [],
+  doing: ['done'],
   done: [],
 };
 
@@ -163,5 +163,5 @@ const PRIORITY_RANK: Record<Priority, number> = { high: 2, medium: 1, low: 0 };
 
 /** Return a new array ordered high -> medium -> low (stable). Does not mutate input. */
 export function sortByPriority(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
+  return [...tasks].sort((a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority]);
 }

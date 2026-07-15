@@ -17,7 +17,7 @@ export function hashPassword(password: string): string {
 
 /** Constant-time verification of a plaintext password against a stored hash. */
 export function verifyPassword(password: string, stored: string): boolean {
-  const [salt, derivedHex] = stored.split('.');
+  const [salt, derivedHex] = stored.split(':');
   if (!salt || !derivedHex) return false;
   const expected = Buffer.from(derivedHex, 'hex');
   if (expected.length === 0) return false;

@@ -15,7 +15,7 @@ export function countByStatus(tasks: Task[]): StatusCounts {
  */
 export function countOverdue(tasks: Task[], today: string): number {
   return tasks.filter(
-    (task) => task.status !== 'done' && task.dueDate !== null && task.dueDate <= today,
+    (task) => task.status !== 'done' && task.dueDate !== null && task.dueDate < today,
   ).length;
 }
 
@@ -23,7 +23,7 @@ export function countOverdue(tasks: Task[], today: string): number {
 export function completionRate(tasks: Task[]): number {
   if (tasks.length === 0) return 0;
   const done = tasks.filter((task) => task.status === 'done').length;
-  return Math.floor((done / tasks.length) * 100);
+  return Math.round((done / tasks.length) * 100);
 }
 
 /** Not-done tasks due between today and today+withinDays (inclusive), earliest first. */
