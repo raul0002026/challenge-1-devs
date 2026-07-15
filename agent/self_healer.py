@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    HookMatcher,
     ResultMessage,
     TextBlock,
     ToolUseBlock,
@@ -29,6 +30,7 @@ from claude_agent_sdk import (
 
 AGENT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = (AGENT_DIR / ".." / "project").resolve()
+TESTS_DIR = (PROJECT_DIR / "tests").resolve()
 
 # --- Presupuesto (criterio de parada explicito) ---------------------------
 MAX_ITERATIONS = int(os.environ.get("AGENT_MAX_ITERATIONS", "6"))
@@ -39,6 +41,126 @@ MAX_TURNS_PER_ITERATION = int(os.environ.get("AGENT_MAX_TURNS", "30"))
 NO_PROGRESS_LIMIT = int(os.environ.get("AGENT_NO_PROGRESS_LIMIT", "2"))
 
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Edit", "Bash"]
+
+# --- Salvaguardas en codigo (no en el prompt) ------------------------------
+DANGEROUS_BASH_PATTERNS = [
+    r"git\s+push",
+    r"git\s+reset\s+--hard",
+    r"git\s+checkout\s+--",
+    r"git\s+clean\s+-f",
+    r"\brm\s+-rf\b",
+    r"\brm\s+-fr\b",
+    r"\.env\b",
+    r">\s*tests?[\\/]",
+]
+
+
+def _resolve_path(raw_path: str) -> Path | None:
+    if not raw_path:
+        return None
+    p = Path(raw_path)
+    if not p.is_absolute():
+        p = PROJECT_DIR / p
+    try:
+        return p.resolve()
+    except OSError:
+        return None
+
+
+async def hook_tool_whitelist(input_data, tool_use_id, context):
+    """Deniega cualquier herramienta fuera del set minimo autorizado."""
+    if input_data["tool_name"] not in ALLOWED_TOOLS:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": input_data["hook_event_name"],
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"Herramienta '{input_data['tool_name']}' fuera del set "
+                    "de minimo privilegio para este agente."
+                ),
+            }
+        }
+    return {}
+
+
+async def hook_block_dangerous_bash(input_data, tool_use_id, context):
+    command = input_data.get("tool_input", {}).get("command", "")
+    for pattern in DANGEROUS_BASH_PATTERNS:
+        if re.search(pattern, command, flags=re.IGNORECASE):
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": input_data["hook_event_name"],
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"Comando bloqueado por patron de seguridad: '{pattern}'. "
+                        "No se permiten operaciones destructivas, push, ni tocar "
+                        "tests o secretos desde Bash."
+                    ),
+                }
+            }
+    return {}
+
+
+async def hook_protect_tests_and_scope(input_data, tool_use_id, context):
+    """Bloquea edicion de tests/ y cualquier ruta fuera de project/."""
+    file_path = input_data.get("tool_input", {}).get("file_path", "")
+    resolved = _resolve_path(file_path)
+    if resolved is None:
+        return {}
+    if TESTS_DIR in resolved.parents or resolved == TESTS_DIR:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": input_data["hook_event_name"],
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "No se permite editar archivos de tests. La correccion "
+                    "debe atacar la causa en el codigo de producto."
+                ),
+            }
+        }
+    if PROJECT_DIR not in resolved.parents and resolved != PROJECT_DIR:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": input_data["hook_event_name"],
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Ruta fuera del proyecto objetivo.",
+            }
+        }
+    return {}
+
+
+async def hook_scope_reads(input_data, tool_use_id, context):
+    """Confina Read/Grep/Glob al directorio del proyecto (evita fugas del secreto)."""
+    tool_input = input_data.get("tool_input", {})
+    raw_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    if not raw_path:
+        return {}
+    resolved = _resolve_path(raw_path)
+    if resolved is None:
+        return {}
+    if PROJECT_DIR not in resolved.parents and resolved != PROJECT_DIR:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": input_data["hook_event_name"],
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "Lectura fuera del proyecto objetivo no permitida "
+                    "(evita fuga del token/secreto del agente)."
+                ),
+            }
+        }
+    return {}
+
+
+def build_hooks():
+    return {
+        "PreToolUse": [
+            HookMatcher(hooks=[hook_tool_whitelist]),
+            HookMatcher(matcher="Bash", hooks=[hook_block_dangerous_bash]),
+            HookMatcher(matcher="Edit", hooks=[hook_protect_tests_and_scope]),
+            HookMatcher(matcher="Read|Grep|Glob", hooks=[hook_scope_reads]),
+        ]
+    }
 
 
 # --- Runner de tests --------------------------------------------------------
@@ -126,8 +248,13 @@ async def run_agent_iteration(prompt: str) -> str:
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_DIR),
         allowed_tools=ALLOWED_TOOLS,
-        permission_mode="acceptEdits",
+        permission_mode="bypassPermissions",
         max_turns=MAX_TURNS_PER_ITERATION,
+        hooks=build_hooks(),
+        system_prompt=(
+            "Eres un agente de reparacion autonomo. Arreglas la causa raiz en "
+            "codigo de producto. Nunca editas tests ni debilitas validaciones."
+        ),
     )
 
     actions: list[str] = []
