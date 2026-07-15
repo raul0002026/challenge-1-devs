@@ -29,6 +29,10 @@ from claude_agent_sdk import (
     query,
 )
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 AGENT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = (AGENT_DIR / ".." / "project").resolve()
 TESTS_DIR = (PROJECT_DIR / "tests").resolve()
@@ -174,12 +178,14 @@ def run_tests() -> tuple[bool, str]:
             cwd=str(PROJECT_DIR),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or "") + (exc.stderr or "") + "\n[TIMEOUT corriendo npm test]"
         return False, output
-    output = proc.stdout + "\n" + proc.stderr
+    output = (proc.stdout or "") + "\n" + (proc.stderr or "")
     return proc.returncode == 0, output
 
 
