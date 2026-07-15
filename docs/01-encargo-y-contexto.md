@@ -9,8 +9,9 @@ Prueba de desempeño de **60 minutos**, no de conocimiento. No se pregunta si sa
 el resultado no se finge: un agente corre o no corre, un bucle converge o gira en vano, un build queda
 en verde legítimo o hecho con trampa.
 
-No se te entrega repositorio, esqueleto ni datos: solo **el objetivo, la herramienta y el token**. El
-resto lo produces tú.
+Se te entrega el **proyecto objetivo** ya listo y **pre-roto** en [`../project/`](../project/): su
+suite de tests arranca en rojo por fallas reales ya inyectadas. Tú no lo construyes ni lo rompes; construyes el
+**agente** que lo sana. La herramienta (Claude Agent SDK) y el token los pones tú.
 
 ## El encargo
 
@@ -37,10 +38,11 @@ terminaste.
 ## Regla de integridad (DESCALIFICATORIA)
 
 Recuperar el verde **borrando, saltando o vaciando tests, o debilitando las validaciones** es hacer
-trampa con la métrica: no aprueba, por bien construido que esté el resto. Como el proyecto lo elegiste
-tú, no vale el escudo de "el repositorio venía así".
+trampa con la métrica: no aprueba, por bien construido que esté el resto. El proyecto viene provisto,
+pero eso **no** habilita debilitar la suite: no vale el escudo de "el repositorio venía así".
 
 ## Qué decides tú
 
-El proyecto objetivo, cómo se rompe, el alcance y el presupuesto de parada. Es deliberado: cada elección
-revela criterio y el evaluador puede cuestionarla.
+La **arquitectura del agente y su bucle**, el alcance, el presupuesto y el criterio de parada, la
+estrategia de recuperación y las salvaguardas. El proyecto objetivo y su falla ya vienen dados; lo que
+revela criterio es **cómo diseñas el agente**. Cada elección es deliberada y el evaluador puede cuestionarla.
