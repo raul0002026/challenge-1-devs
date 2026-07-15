@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -200,6 +201,29 @@ def failure_signature(test_output: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8", errors="ignore")).hexdigest()[:12]
 
 
+# --- Bitacora incremental ----------------------------------------------------
+
+class Logger:
+    """Escribe a archivo (y a stdout) linea por linea, mientras el bucle corre."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self.path, "a", encoding="utf-8")
+
+    def write(self, text: str):
+        self._fh.write(text + "\n")
+        self._fh.flush()
+        print(text)
+
+    def close(self):
+        self._fh.close()
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # --- Invocacion del agente ---------------------------------------------------
 
 def build_prompt(test_output: str, attempts: list[dict], warn_same_failure: bool) -> str:
@@ -244,7 +268,8 @@ Historial de intentos previos en este ciclo de reparacion:
 """
 
 
-async def run_agent_iteration(prompt: str) -> str:
+async def run_agent_iteration(prompt: str, logger: Logger) -> tuple[str, float, int]:
+    """Ejecuta una invocacion del SDK y devuelve (resumen_acciones, costo_usd, num_turns)."""
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_DIR),
         allowed_tools=ALLOWED_TOOLS,
@@ -258,20 +283,33 @@ async def run_agent_iteration(prompt: str) -> str:
     )
 
     actions: list[str] = []
+    cost = 0.0
+    num_turns = 0
 
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):
             for block in message.content:
                 if isinstance(block, TextBlock) and block.text.strip():
-                    print(f"  [razonamiento] {block.text.strip()[:500]}")
+                    logger.write(f"  [razonamiento] {block.text.strip()[:500]}")
                     actions.append(f"dijo: {block.text.strip()[:120]}")
                 elif isinstance(block, ToolUseBlock):
-                    print(f"  [herramienta] {block.name}")
-                    actions.append(block.name)
+                    detail = ""
+                    if block.name == "Edit":
+                        detail = f" file={block.input.get('file_path', '')}"
+                    elif block.name == "Bash":
+                        detail = f" cmd={block.input.get('command', '')[:120]}"
+                    logger.write(f"  [herramienta] {block.name}{detail}")
+                    actions.append(f"{block.name}{detail}")
         elif isinstance(message, ResultMessage):
-            print(f"  [resultado agente] subtype={message.subtype} is_error={message.is_error}")
+            cost = message.total_cost_usd or 0.0
+            num_turns = message.num_turns
+            logger.write(
+                f"  [resultado agente] subtype={message.subtype} "
+                f"is_error={message.is_error} turnos={num_turns} costo=${cost:.4f}"
+            )
 
-    return "; ".join(actions[-6:]) if actions else "(sin acciones registradas)"
+    summary = "; ".join(actions[-6:]) if actions else "(sin acciones registradas)"
+    return summary, cost, num_turns
 
 
 # --- Bucle principal ---------------------------------------------------------
@@ -287,39 +325,72 @@ async def main():
         )
         sys.exit(1)
 
+    if not (PROJECT_DIR / "node_modules").exists():
+        print(
+            f"No existen node_modules en {PROJECT_DIR}. Corre 'npm install' ahi "
+            "antes de ejecutar el agente.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    logger = Logger(AGENT_DIR / "logs" / f"run-{run_id}.md")
+    total_cost = 0.0
+
+    logger.write(f"# Bitacora de reparacion autonoma — {now()}")
+    logger.write(
+        f"\nPresupuesto: max_iteraciones={MAX_ITERATIONS}, "
+        f"max_segundos={MAX_SECONDS}, no_progreso_limite={NO_PROGRESS_LIMIT}\n"
+    )
+
     start = time.monotonic()
 
+    logger.write("## Chequeo inicial\n")
     passed, output = run_tests()
-    print(f"npm test inicial: {'VERDE' if passed else 'ROJO'}")
+    logger.write(f"- `npm test` inicial: {'VERDE' if passed else 'ROJO'}")
     if passed:
-        print("La suite ya esta en verde antes de invocar al agente. Abortando.")
+        logger.write(
+            "\nLa suite ya esta en verde antes de invocar al agente. Se esperaba "
+            "un rojo inicial inyectado; no hay nada que reparar. Abortando."
+        )
+        logger.close()
         return
+
+    logger.write("```\n" + truncate(output, 3000) + "\n```\n")
 
     attempts: list[dict] = []
     signatures: list[str] = []
+    final_state = "presupuesto de iteraciones agotado"
 
     for iteration in range(1, MAX_ITERATIONS + 1):
-        if time.monotonic() - start > MAX_SECONDS:
-            print("Presupuesto de tiempo agotado.")
+        elapsed = time.monotonic() - start
+        if elapsed > MAX_SECONDS:
+            final_state = f"presupuesto de tiempo agotado ({elapsed:.0f}s)"
             break
 
         sig = failure_signature(output)
         recent = signatures[-(NO_PROGRESS_LIMIT - 1):] if NO_PROGRESS_LIMIT > 1 else []
         if len(recent) == NO_PROGRESS_LIMIT - 1 and all(s == sig for s in recent):
-            print(
-                f"No-progreso: la firma del fallo ({sig}) se repite "
-                f"{NO_PROGRESS_LIMIT} veces seguidas. Me detengo con diagnostico."
+            logger.write(
+                f"\n## Deteccion de no-progreso en iteracion {iteration}\n\n"
+                f"La firma del fallo (`{sig}`) se repite {NO_PROGRESS_LIMIT} veces "
+                "seguidas: la correccion no ataca la causa real. Me detengo con "
+                "diagnostico en vez de seguir intentando a ciegas.\n"
             )
+            final_state = "detenido por no-progreso (firma de fallo repetida)"
             break
 
         warn_same = bool(signatures) and signatures[-1] == sig
-        print(f"\n== Iteracion {iteration} (firma={sig}) ==")
+        logger.write(f"\n## Iteracion {iteration} — {now()}\n")
+        logger.write(f"- Firma del fallo: `{sig}`")
+
         prompt = build_prompt(output, attempts, warn_same)
-        actions_summary = await run_agent_iteration(prompt)
+        actions_summary, cost, num_turns = await run_agent_iteration(prompt, logger)
+        total_cost += cost
 
         passed, output = run_tests()
         result_text = "VERDE" if passed else "sigue en ROJO"
-        print(f"Resultado tras la correccion: {result_text}")
+        logger.write(f"- Resultado tras la correccion: {result_text}")
 
         attempts.append(
             {
@@ -332,7 +403,19 @@ async def main():
         signatures.append(sig)
 
         if passed:
+            final_state = f"verde alcanzado en iteracion {iteration}"
             break
+
+    elapsed_total = time.monotonic() - start
+    logger.write(
+        f"\n## Cierre — {now()}\n\n"
+        f"- Estado final: {final_state}\n"
+        f"- Iteraciones usadas: {len(attempts)} / {MAX_ITERATIONS}\n"
+        f"- Tiempo total: {elapsed_total:.0f}s / {MAX_SECONDS}s\n"
+        f"- Costo total estimado: ${total_cost:.4f}\n"
+        f"- Suite final: {'VERDE' if passed else 'ROJO'}\n"
+    )
+    logger.close()
 
     sys.exit(0 if passed else 1)
 
